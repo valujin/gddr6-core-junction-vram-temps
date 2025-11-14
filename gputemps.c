@@ -11,6 +11,8 @@
 #include <signal.h>
 #include <termios.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define REFRESH_DURATION 1
 #define BUFFER_SIZE 1024
@@ -45,7 +47,8 @@ typedef enum {
 
 typedef enum {
     MODE_CONTINUOUS,
-    MODE_ONCE
+    MODE_ONCE,
+    MODE_DAEMON
 } OutputMode;
 
 typedef struct {
@@ -311,6 +314,62 @@ static int monitor_temperatures_json(Context *ctx) {
     return 0;
 }
 
+static int write_temp_to_file(const char *path, uint32_t temp_celsius) {
+    FILE *fp = fopen(path, "w");
+    if (!fp) {
+        fprintf(stderr, "Failed to open %s: %s\n", path, strerror(errno));
+        return -1;
+    }
+    
+    // Convert to millidegrees (multiply by 1000)
+    fprintf(fp, "%u\n", temp_celsius * 1000);
+    fclose(fp);
+    return 0;
+}
+
+static int create_gpu_directory(unsigned int index) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/gputemps/%u", index);
+    
+    // Create parent directory first if needed
+    if (mkdir("/tmp/gputemps", 0755) < 0 && errno != EEXIST) {
+        fprintf(stderr, "Failed to create /tmp/gputemps: %s\n", strerror(errno));
+        return -1;
+    }
+    
+    // Create GPU-specific directory
+    if (mkdir(path, 0755) < 0 && errno != EEXIST) {
+        fprintf(stderr, "Failed to create %s: %s\n", path, strerror(errno));
+        return -1;
+    }
+    
+    return 0;
+}
+
+static int monitor_temperatures_daemon(Context *ctx) {
+    for (unsigned int i = 0; i < ctx->device_count; i++) {
+        GpuDevice gpu = {0};
+        if (get_gpu_temps(ctx, i, &gpu) != 0) return -1;
+        
+        // Create directory for this GPU if it doesn't exist
+        if (create_gpu_directory(i) < 0) return -1;
+        
+        // Write temperatures to files in millidegrees
+        char path[256];
+        
+        snprintf(path, sizeof(path), "/tmp/gputemps/%u/core", i);
+        if (write_temp_to_file(path, gpu.gpu_temp) < 0) return -1;
+        
+        snprintf(path, sizeof(path), "/tmp/gputemps/%u/junction", i);
+        if (write_temp_to_file(path, gpu.junction_temp) < 0) return -1;
+        
+        snprintf(path, sizeof(path), "/tmp/gputemps/%u/vram", i);
+        if (write_temp_to_file(path, gpu.vram_temp) < 0) return -1;
+    }
+    
+    return 0;
+}
+
 static int init_monitoring(Context *ctx) {
     if ((check_root_privileges() < 0) ||
         (init_pci(ctx) < 0) ||
@@ -358,6 +417,14 @@ static int run_json_loop(Context *ctx) {
     return 0;
 }
 
+static int run_daemon_loop(Context *ctx) {
+    while (running) {
+        if (monitor_temperatures_daemon(ctx) != 0) return -1;
+        sleep(REFRESH_DURATION);
+    }
+    return 0;
+}
+
 static void print_usage(const char *prog) {
     fprintf(stderr,
         "Usage: %s [OPTIONS]\n"
@@ -365,14 +432,16 @@ static void print_usage(const char *prog) {
         "Options:\n"
         "  --json           Output temperatures in JSON format\n"
         "  --once           Output temperatures once\n"
+        "  --daemon         Run in daemon mode, writing temps to /tmp/gputemps/{index}/{core,junction,vram}\n"
         "  --help           Show this help message and exit\n"
         "\n"
         "Examples:\n"
         "  %s                Display and update table of GPU temperatures\n"
         "  %s --json         Continuously output GPU temperatures in JSON format\n"
         "  %s --once         Output temperatures once in table format\n"
-        "  %s --json --once  Output temperatures once in JSON format\n",
-        prog, prog, prog, prog, prog);
+        "  %s --json --once  Output temperatures once in JSON format\n"
+        "  %s --daemon       Run in daemon mode, writing temps to sysfs-formatted files (in millidegrees)\n",
+        prog, prog, prog, prog, prog, prog);
 }
 
 int main(int argc, char *argv[]) {
@@ -385,6 +454,8 @@ int main(int argc, char *argv[]) {
             ctx.output_format = FORMAT_JSON;
         } else if (strcmp(argv[i], "--once") == 0) {
             ctx.output_mode = MODE_ONCE;
+        } else if (strcmp(argv[i], "--daemon") == 0) {
+            ctx.output_mode = MODE_DAEMON;
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -411,7 +482,9 @@ int main(int argc, char *argv[]) {
     }
 
     int result;
-    if (ctx.output_format == FORMAT_JSON && ctx.output_mode == MODE_CONTINUOUS) {
+    if (ctx.output_mode == MODE_DAEMON) {
+        result = run_daemon_loop(&ctx);
+    } else if (ctx.output_format == FORMAT_JSON && ctx.output_mode == MODE_CONTINUOUS) {
         result = run_json_loop(&ctx);
     } else if (ctx.output_format == FORMAT_JSON && ctx.output_mode == MODE_ONCE) {
         result = monitor_temperatures_json(&ctx);
