@@ -102,6 +102,35 @@ cat /tmp/gputemps/0/vram
 
 This format makes it easy to integrate with monitoring tools that read sysfs-style temperature sensors.
 
+#### Running as a systemd service
+
+For persistent monitoring, you can install and run gputemps as a systemd service:
+
+```bash
+# Copy the binary to /usr/local/bin
+sudo cp gputemps /usr/local/bin/
+
+# Copy the service file to systemd directory
+sudo cp gputemps.service /etc/systemd/system/
+
+# Reload systemd to recognize the new service
+sudo systemctl daemon-reload
+
+# Enable the service to start on boot
+sudo systemctl enable gputemps.service
+
+# Start the service
+sudo systemctl start gputemps.service
+
+# Check service status
+sudo systemctl status gputemps.service
+```
+
+View logs with:
+```bash
+sudo journalctl -u gputemps.service -f
+```
+
 <br>
 
 ## Troubleshooting (in case of mmap error)

@@ -1,0 +1,22 @@
+[Unit]
+Description=GPU Temperature Monitor (Core, Junction, VRAM)
+Documentation=https://github.com/valujin/gddr6-core-junction-vram-temps
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gputemps --daemon
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp/gputemps
+
+[Install]
+WantedBy=multi-user.target
