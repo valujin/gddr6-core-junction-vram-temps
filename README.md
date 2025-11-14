@@ -65,6 +65,7 @@ Press any key or `CTRL+C` to exit.
 
 - `--once`: Output temperatures a single time and then exit.
 - `--json`: Output temperatures in JSONL format, one object per line.
+- `--daemon`: Run in daemon mode, writing temperatures to sysfs-formatted files.
 
 ### JSON Format
 
@@ -80,6 +81,26 @@ Press any key or `CTRL+C` to exit.
 ```json
 {"timestamp":1678886400,"gpus":[{"index":0,"core":55,"junction":68,"vram":72}]}
 ```
+
+### Daemon Mode
+
+When running with `--daemon`, the program continuously monitors GPU temperatures and writes them to sysfs-formatted files at `/tmp/gputemps/{index}/{core,junction,vram}`.
+
+Temperature values are stored in millidegrees (multiply by 1000), following the Linux sysfs thermal sensor convention.
+
+#### Example:
+
+```bash
+sudo ./gputemps --daemon &
+cat /tmp/gputemps/0/core
+55000
+cat /tmp/gputemps/0/junction
+68000
+cat /tmp/gputemps/0/vram
+72000
+```
+
+This format makes it easy to integrate with monitoring tools that read sysfs-style temperature sensors.
 
 <br>
 
